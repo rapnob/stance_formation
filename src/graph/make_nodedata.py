@@ -1,0 +1,114 @@
+
+import argparse
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='')
+
+    parser.add_argument('input_time_series_counter', type=str)
+    parser.add_argument('span', type=str)
+    parser.add_argument('output', type=str)
+    parser.add_argument('--log', default='WARNING', type=str)
+    return parser.parse_args()
+
+args = parse_arguments()
+
+import pandas as pd
+import numpy as np
+import logging
+from tqdm import tqdm
+
+fmt = "%(asctime)s %(levelname)s %(name)s : %(message)s"
+logging.basicConfig(level=args.log, format=fmt)
+
+p = args.input_time_series_counter
+time_series_counter = pd.read_pickle(p)
+span = args.span
+
+
+
+if span in ["06-1-10","06-11-20","06-21-30","07-1-10","07-11-20","07-21-31","08-1-10","08-11-20","08-21-31"]:
+    span2 = "06to08"
+elif span in ["09-1-10","09-11-20","09-21-30","10-1-10","10-11-20","10-21-31"]:
+    span2 = "09to10"
+else:
+    raise ValueError(span + ' is invalid.')
+    
+path = f'/data/str01_03/twitter/hisamits/data/youtube/2021-{span2}_T/concat/2021-{span2}_all_with_label_not_just_share_2.csv'
+
+logging.info('Loading hisa data...')    
+df = pd.read_csv(path)
+logging.info('Loadded.')
+
+m=span.split('-')[0]
+s=span.split('-')[1]
+e=span.split('-')[2]
+start='2021-'+m+'-'+s
+end='2021-'+m+'-'+e
+
+fields = ['datetime', 'uid', 'id', 'user/screen_name', 'user/location', 'title', 'url', 'user/followers_count', 'user/friends_count', 'source']
+
+df_in_span=df[(start <= df['datetime']) & (df['datetime']<=end)]
+in_span_users=df_in_span.drop_duplicates(subset='uid')['uid'].to_list()
+df_in_span=df_in_span.set_index('uid')
+date_index = pd.date_range("2021-"+m+"-"+s, periods=(pd.to_datetime(end)-pd.to_datetime(start)+pd.Timedelta(days=1)).days, freq="D").to_list()
+features=[]
+
+logging.info('Making node data...')
+
+for id_ in tqdm(in_span_users, ncols=2):
+    posi=0
+    nega=0
+    neu=0
+    post=df_in_span.loc[id_,:]
+    if type(post)==pd.core.series.Series:
+        post=pd.DataFrame([post])
+    latest_post = post.tail(1)
+    screen_name=latest_post['user/screen_name'].values[0]
+    location=latest_post['user/location'].values[0]
+    if type(location)!=str:
+        location="-"
+    url_title=post['title'].values[0]
+    url=post['url'].values[0]
+    follower_count=latest_post['user/followers_count'].values[0]
+    friend_count=latest_post['user/friends_count'].values[0]
+    source=latest_post['source'].values[0]
+
+    for date in date_index:
+        # if time_series_counter[(id_,date)]>0:
+        #     posi+=1
+        # elif time_series_counter[(id_,date)]<0:
+        #     nega+=-1
+        # elif time_series_counter[(id_,date)]==0:
+        #     neu+=1
+        posi += time_series_counter.get((id_, date,  '1'), 0)
+        neu  += time_series_counter.get((id_, date,  '0'), 0)
+        nega += time_series_counter.get((id_, date, '-1'), 0)
+    s_score=(posi+nega+neu)/len(date_index)
+    if s_score > 0:
+        s_avg=1
+    elif s_score < 0:
+        s_avg=-1
+    else:
+        s_avg=0
+    # m = np.argmax([-nega,neu,posi])
+    m = np.argmax([posi, neu, nega])
+    if m==0:
+        s=1
+    elif m==1:
+        s=0
+    else:
+        s=-1
+    # m = np.argmax([-nega,neu,posi])
+    m2 = 0
+    if posi > nega:
+        m2 = 1
+    elif posi < nega:
+        m2 = -1
+        
+    values = [id_, screen_name, location, s, 
+              url_title, url, follower_count, 
+              friend_count, source, s_avg, m2]
+    features.append(values)
+nodes_sample=pd.DataFrame(features, columns=["id","Label","location","s","url_title","url","follower_count","friend_count","source","s_avg", "s_cs"])
+nodes_sample.to_csv(args.output, index=None)
+
+logging.info('Finished.')

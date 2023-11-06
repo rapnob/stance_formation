@@ -1,0 +1,50 @@
+import numpy as np
+import argparse
+import networkx as nx
+
+OUT_THRESHOLD=30
+IN_THRESHOLD=30
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='')
+    parser.add_argument('input_nodepath', type=str)
+    parser.add_argument('span', type=str)
+    parser.add_argument('output_graphml', type=str)
+    return parser.parse_args()
+
+args = parse_arguments()
+
+if ("09-" in file) or ("10-" in file):
+    dir="09to10"
+else:
+    dir="06to08"
+    
+path = args.input_nodepath
+span = args.span
+nodes=pd.read_csv(path, index_col="id")
+nodes=nodes[nodes['Label'].isnull()!=True]
+
+# #top_clusters=[x[0] for x in collections.Counter(nodes['modularity_class'].to_list()).most_common(3)]
+# #nodes=nodes.query('modularity_class==@top_clusters[0] | modularity_class==@top_clusters[1] | modularity_class==@top_clusters[2]')
+nodes_id=nodes.index
+
+df=pd.read_csv("/data/str01_03/twitter/hisamits/data/youtube/2021-"+dir+"_RMQ_tlg/edges/2021-" + span + "_edges.csv")
+df=df[df['source'].isin(nodes_id)]
+df=df[df['target'].isin(nodes_id)]
+df.loc[:,['source','target']]
+
+lines=df['source'].astype(str).str.cat(df['target'].astype(str), sep=' ').to_list()
+c=collections.Counter(lines)
+lines=[x+" "+str(c[x]) for x in lines]
+
+Graphtype = nx.DiGraph() # 有向グラフ
+G = nx.read_weighted_edgelist(lines, create_using=Graphtype,nodetype=int)
+# nx.set_node_attributes(G, dict(nodes['s_avg']), "stance")
+nx.set_node_attributes(G, dict(nodes['s']), "stance")
+
+G.remove_nodes_from(list(set([key for key in dict(G.nodes(data=True)).keys()]) - (set([key for key in dict(G.nodes(data=True)).keys()  if G.in_degree[key]>=IN_THRESHOLD]) | set([key for key in dict(G.nodes(data=True)).keys() if G.out_degree[key]>=OUT_THRESHOLD]))))
+
+#top_clusters=[x[0] for x in collections.Counter([value['modularity_class'] for value in dict(G.nodes(data=True)).values()]).most_common(3)]
+#G.remove_nodes_from([key for key in dict(G.nodes(data=True)).keys() if G.nodes(data=True)[key]['modularity_class'] not in top_clusters])
+path = args.output_graphml
+nx.write_graphml(G, "data/hisa/graph/graphml/"+file+"_30.graphml")
